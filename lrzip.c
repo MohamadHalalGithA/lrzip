@@ -73,7 +73,20 @@ static i64 fdout_seekto(rzip_control *control, i64 pos)
 	return lseek(control->fd_out, pos, SEEK_SET);
 }
 
-#ifdef __APPLE__
+#ifdef LR_PLATFORM_WIN32
+i64 get_ram(rzip_control *control)
+{
+	i64 ramsize = lr_physical_ram();
+
+	/* No /proc/meminfo fallback to try: GlobalMemoryStatusEx is the answer
+	   on Windows, and if it fails the window heuristics have nothing to
+	   work from. */
+	if (unlikely(ramsize <= 0))
+		fatal_return(("Failed to get physical RAM size in get_ram\n"), -1);
+
+	return ramsize;
+}
+#elif defined(__APPLE__)
 # include <sys/sysctl.h>
 i64 get_ram(rzip_control *control)
 {
@@ -417,11 +430,11 @@ static bool preserve_perms(rzip_control *control, int fd_in, int fd_out)
 
 	if (unlikely(fstat(fd_in, &st)))
 		fatal_return(("Failed to fstat input file\n"), false);
-	if (unlikely(fchmod(fd_out, (st.st_mode & 0666))))
+	if (unlikely(!lr_set_mode(fd_out, st.st_mode & 0666)))
 		print_verbose("Warning, unable to set permissions on %s\n", control->outfile);
 
 	/* chown fail is not fatal_return(( */
-	if (unlikely(fchown(fd_out, st.st_uid, st.st_gid)))
+	if (unlikely(!lr_set_owner(fd_out, st.st_uid, st.st_gid)))
 		print_verbose("Warning, unable to set owner on %s\n", control->outfile);
 	return true;
 }
@@ -525,7 +538,7 @@ static bool dump_tmpoutfile(rzip_control *control)
 	if (unlikely(fd_out == -1))
 		fatal_return(("Failed: No temporary outfile created, unable to do in ram\n"), false);
 	/* flush anything not yet in the temporary file */
-	fsync(fd_out);
+	lr_fsync(fd_out);
 	tmpoutfp = fdopen(fd_out, "r");
 	if (unlikely(tmpoutfp == NULL))
 		fatal_return(("Failed to fdopen out tmpfile\n"), false);
@@ -1683,7 +1696,6 @@ error:
 
 static int get_available_cpus(void)
 {
-	long sys;
 #ifdef __linux__
 	cpu_set_t mask;
 	CPU_ZERO(&mask);
@@ -1694,12 +1706,9 @@ static int get_available_cpus(void)
 		    return count;
 	}
 #endif
-	/* Fallback to system-wide online CPUs */
-	sys = sysconf(_SC_NPROCESSORS_ONLN);
-	if (sys > 0)
-		return (int)sys;
-
-	return 1;  /* Absolute minimum */
+	/* Fallback to system-wide online CPUs. lr_cpu_count() never returns less
+	   than 1, so it also supplies the absolute-minimum case. */
+	return lr_cpu_count();
 }
 
 bool initialise_control(rzip_control *control)
