@@ -78,7 +78,9 @@ libtmplrzip_la_SOURCES += \
   platform/win32/lr_io.c \
   platform/win32/lr_mmap.c \
   platform/win32/lr_proc.c \
-  platform/win32/lr_signal.c
+  platform/win32/lr_random.c \
+  platform/win32/lr_signal.c \
+  platform/win32/lr_sysinfo.c
 else
 libtmplrzip_la_SOURCES += \
   platform/posix/lr_console.c \
@@ -86,7 +88,9 @@ libtmplrzip_la_SOURCES += \
   platform/posix/lr_io.c \
   platform/posix/lr_mmap.c \
   platform/posix/lr_proc.c \
-  platform/posix/lr_signal.c
+  platform/posix/lr_random.c \
+  platform/posix/lr_signal.c \
+  platform/posix/lr_sysinfo.c
 endif
 
 libtmplrzip_la_LIBADD = lzma/C/liblzma.la
