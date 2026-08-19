@@ -1101,7 +1101,7 @@ static inline void init_hash_indexes(struct rzip_state *st)
 	int i;
 
 	for (i = 0; i < 256; i++)
-		st->hash_index[i] = (tag)(((unsigned)random() << 16) ^ (unsigned)random());
+		st->hash_index[i] = (tag)lr_random32();
 }
 
 #if !defined(__linux)
