@@ -70,9 +70,61 @@ lr_i64 lr_free_space(int fd);
 /* Copy a modification time onto a file.                          SESSION 9 */
 bool lr_set_file_time(const char *path, time_t mtime);
 
+/* Flush a descriptor's written data to the storage device.       SESSION 7 */
+bool lr_fsync(int fd);
+
+/* Apply the permission bits of a POSIX mode to an open file.
+
+   Windows has no POSIX permission model. The only bit it can honour is the
+   read-only attribute, which the owner-write bit maps onto; the group and
+   other bits have no representation and are discarded.
+
+   fd must be open for writing. The win32 side sets the attribute through the
+   handle, which needs FILE_WRITE_ATTRIBUTES access; a read-only descriptor
+   fails with ERROR_ACCESS_DENIED. Both call sites pass the output file, which
+   is opened O_WRONLY or O_RDWR, so this costs nothing -- but it is a real
+   precondition and callers should not assume otherwise.           SESSION 7 */
+bool lr_set_mode(int fd, unsigned int mode);
+
+/* Apply a POSIX owner to an open file.
+
+   Returns true on Windows without doing anything, and that is the honest
+   answer rather than a papered-over failure: Windows has no uid/gid, and a
+   file created by this process is already owned by the user running it, so
+   the caller's goal -- output owned like the input -- already holds. Returning
+   false would print a warning on every single run for a non-problem.
+                                                                  SESSION 7 */
+bool lr_set_owner(int fd, unsigned int uid, unsigned int gid);
+
+/* -------------------------------------------------------- system information
+   Total physical RAM in bytes, or -1 if it cannot be determined.
+
+   This is not a convenience query. lrzip sizes its compression window from
+   available RAM -- handling files larger than memory is the reason the program
+   exists -- so a wrong answer here silently degrades every compression, and a
+   too-large answer drives the machine into swap.                 SESSION 7 */
+lr_i64 lr_physical_ram(void);
+
+/* Online CPUs usable by this process. Never returns less than 1, so callers
+   can use the result directly as a thread count.                  SESSION 7 */
+int lr_cpu_count(void);
+
 /* ------------------------------------------------------------------- timing
    Monotonic-ish millisecond clock for progress reporting.        SESSION 9 */
 lr_i64 lr_time_ms(void);
+
+/* -------------------------------------------------------------- pseudorandom
+   A full-width 32-bit value for seeding rzip's rolling-hash index table.
+
+   Deliberately 32 bits rather than a random() clone. lrzip never seeds the
+   generator, so on glibc hash_index[] is a fixed table, identical on every run
+   and every machine, and compressed output is reproducible. Two properties
+   must therefore survive the port: every one of the 32 bits must vary, and the
+   sequence must stay deterministic. Windows' rand() satisfies neither -- UCRT
+   caps RAND_MAX at 32767, so the upstream expression built from two rand()
+   calls would leave bits 15 and 31 permanently zero and weaken the hash that
+   drives match-finding.                                           SESSION 7 */
+uint32_t lr_random32(void);
 
 /* --------------------------------------------------------------- scheduling
    Drop this process to background priority ("nice").             SESSION 9 */
