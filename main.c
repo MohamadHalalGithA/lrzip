@@ -154,12 +154,10 @@ static void license(void)
 	print_output("There is NO WARRANTY, to the extent permitted by law.\n");
 }
 
-static void sighandler(int sig __UNUSED__)
+/* Suppressing further interrupts before cleanup is now the platform layer's
+   job -- it knows which signals the platform has. */
+static void sighandler(void)
 {
-	signal(sig, SIG_IGN);
-	signal(SIGTERM, SIG_IGN);
-	signal(SIGTTIN, SIG_IGN);
-	signal(SIGTTOU, SIG_IGN);
 	print_err("Interrupted\n");
 	fatal_exit(&local_control);
 }
@@ -322,7 +320,6 @@ int main(int argc, char *argv[])
 	bool lrzcat = false, compat = false, recurse = false;
 	bool options_file = false, conf_file_compression_set = false; /* for environment and tracking of compression setting */
 	struct timeval start_time, end_time;
-	struct sigaction handler;
 	double seconds,total_time; // for timers
 	bool nice_set = false, threads_set = false, filter_set = false;
 	int c, i;
@@ -762,11 +759,7 @@ recursion:
 			control->inFILE = stdin;
 
 		/* Implement signal handler only once flags are set */
-		sigemptyset(&handler.sa_mask);
-		handler.sa_flags = 0;
-		handler.sa_handler = &sighandler;
-		sigaction(SIGTERM, &handler, 0);
-		sigaction(SIGINT, &handler, 0);
+		lr_install_interrupt_handler(&sighandler);
 
 		if (!FORCE_REPLACE) {
 			if (STDIN && isatty(fileno((FILE *)stdin))) {

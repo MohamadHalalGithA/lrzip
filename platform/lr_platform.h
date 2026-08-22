@@ -137,13 +137,28 @@ ssize_t lr_pread(int fd, void *buf, size_t count, lr_i64 offset);
 ssize_t lr_pwrite(int fd, const void *buf, size_t count, lr_i64 offset);
 
 /* --------------------------------------------------------------- interrupts
-   Install a Ctrl+C handler.
+   Install a handler for interrupt-style events: Ctrl+C and a termination
+   request on both platforms, plus console-close, logoff and shutdown on
+   Windows, which has no SIGTERM.
+
+   The handler takes no argument because the caller never used the signal
+   number for anything but re-arming, and re-arming is done here instead --
+   which signals exist is platform knowledge. SIGTTIN and SIGTTOU have no
+   Windows counterpart at all.
 
    Semantic difference that must not be papered over: on POSIX the handler runs
    on the interrupted thread in signal context, so only async-signal-safe calls
    are legal. On Windows it runs on a separate OS-created thread, so it must be
-   thread-safe instead. Keep handlers minimal -- set a flag and return.
-                                                                  SESSION 8 */
+   thread-safe instead, and repeat events arrive on further new threads rather
+   than being held off by a signal mask. The win32 backend refuses re-entry
+   explicitly for that reason.
+
+   HAZARD, inherited rather than introduced: lrzip's handler does not set a
+   flag and return. It unlinks files, prints, flushes and calls exit(). On
+   POSIX that is already outside what a signal handler may safely do; on
+   Windows it additionally races the main thread, which keeps running. Making
+   this genuinely safe means a flag-and-poll shutdown across lrzip's worker
+   loops, which is a redesign rather than a port.        SESSION 8 */
 bool lr_install_interrupt_handler(void (*handler)(void));
 
 /* ----------------------------------------------------------- memory mapping
