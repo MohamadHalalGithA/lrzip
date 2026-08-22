@@ -69,7 +69,7 @@ libtmplrzip_la_SOURCES = \
   libzpaq/libzpaq.h \
   libzpaq/zpaq_lrzip.cpp
 
-# Exactly one backend is compiled. Both directories carry the same six
+# Exactly one backend is compiled. Both directories carry the same eight
 # filenames, so switching platforms switches a directory.
 if LR_PLATFORM_WIN32
 libtmplrzip_la_SOURCES += \

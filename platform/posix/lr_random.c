@@ -1,0 +1,18 @@
+/* Pseudorandom source, POSIX.                                    SESSION 7 */
+
+#include "lr_platform.h"
+#include <stdlib.h>
+
+uint32_t lr_random32(void)
+{
+	/* The expression this replaced in rzip.c, reproduced exactly. random()
+	   returns 31 bits, so one call cannot fill 32; the shift-and-xor pair is
+	   upstream's construction and is kept verbatim so that Linux output
+	   remains bit-identical to every previous release.
+
+	   No seeding, also as upstream: lrzip never calls srandom(), so this is
+	   glibc's fixed default sequence and hash_index[] is the same table on
+	   every run. That reproducibility is a property callers rely on, not an
+	   oversight to be corrected here. */
+	return ((uint32_t)random() << 16) ^ (uint32_t)random();
+}
