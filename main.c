@@ -488,8 +488,8 @@ int main(int argc, char *argv[])
 		case 'N':
 			nice_set = true;
 			control->nice_val = strtol(optarg, &endptr, 10);
-			if (control->nice_val < PRIO_MIN || control->nice_val > PRIO_MAX)
-				failure("Invalid nice value (must be %d...%d)\n", PRIO_MIN, PRIO_MAX);
+			if (control->nice_val < LR_PRIO_MIN || control->nice_val > LR_PRIO_MAX)
+				failure("Invalid nice value (must be %d...%d)\n", LR_PRIO_MIN, LR_PRIO_MAX);
 			if (*endptr)
 				failure("Extra characters after nice level: \'%s\'\n", endptr);
 			break;
@@ -674,20 +674,20 @@ int main(int argc, char *argv[])
 
 	/* Set the main nice value to half that of the backend threads since
 	 * the rzip stage is usually the rate limiting step */
-	control->current_priority = getpriority(PRIO_PROCESS, 0);
+	control->current_priority = lr_get_priority();
 	if (nice_set) {
 		if (!NO_COMPRESS) {
 			/* If niceness can't be set. just reset process priority */
-			if (unlikely(setpriority(PRIO_PROCESS, 0, control->nice_val/2) == -1)) {
+			if (unlikely(!lr_set_priority(control->nice_val/2))) {
 				print_err("Warning, unable to set nice value %d...Resetting to %d\n",
 					control->nice_val, control->current_priority);
-				setpriority(PRIO_PROCESS, 0, (control->nice_val=control->current_priority));
+				lr_set_priority((control->nice_val=control->current_priority));
 			}
 		} else {
-			if (unlikely(setpriority(PRIO_PROCESS, 0, control->nice_val) == -1)) {
+			if (unlikely(!lr_set_priority(control->nice_val))) {
 				print_err("Warning, unable to set nice value %d...Resetting to %d\n",
 					control->nice_val, control->current_priority);
-				setpriority(PRIO_PROCESS, 0, (control->nice_val=control->current_priority));
+				lr_set_priority((control->nice_val=control->current_priority));
 			}
 		}
 	}
