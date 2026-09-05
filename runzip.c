@@ -495,14 +495,14 @@ static bool unfilter_chunk(rzip_control *control, i64 start, i64 len, uint32 *ck
 
 		/* fd_out may be write only; fd_hist is a readable descriptor
 		 * on the same output file */
-		if (unlikely(pread(control->fd_hist, buf + carry, (size_t)n,
+		if (unlikely(lr_pread(control->fd_hist, buf + carry, (size_t)n,
 				   start + processed + carry) != (ssize_t)n)) {
 			dealloc(buf);
 			fatal_return(("Failed to pread in unfilter_chunk\n"), false);
 		}
 		last = (processed + total == len);
 		done = lrz_filter_stream_conv(&fs, buf, total, last);
-		if (unlikely(pwrite(control->fd_out, buf, (size_t)done,
+		if (unlikely(lr_pwrite(control->fd_out, buf, (size_t)done,
 				    start + processed) != (ssize_t)done)) {
 			dealloc(buf);
 			fatal_return(("Failed to pwrite in unfilter_chunk\n"), false);
