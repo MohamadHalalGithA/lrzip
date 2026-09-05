@@ -1584,9 +1584,9 @@ static void *compthread(void *data)
 	cti = &cthreads[i];
 	ctis = cti->sinfo;
 
-	if (unlikely(setpriority(PRIO_PROCESS, 0, control->nice_val) == -1)) {
+	if (unlikely(!lr_set_priority(control->nice_val))) {
 		print_err("Warning, unable to set thread nice value %d...Resetting to %d\n", control->nice_val, control->current_priority);
-		setpriority(PRIO_PROCESS, 0, (control->nice_val=control->current_priority));
+		lr_set_priority((control->nice_val=control->current_priority));
 	}
 	cti->c_type = CTYPE_NONE;
 	cti->c_len = cti->s_len;
@@ -1941,9 +1941,9 @@ static void *ucompthread(void *data)
 
 	dealloc(data);
 
-	if (unlikely(setpriority(PRIO_PROCESS, 0, control->nice_val) == -1)) {
+	if (unlikely(!lr_set_priority(control->nice_val))) {
 		print_err("Warning, unable to set thread nice value %d...Resetting to %d\n", control->nice_val, control->current_priority);
-		setpriority(PRIO_PROCESS, 0, (control->nice_val=control->current_priority));
+		lr_set_priority((control->nice_val=control->current_priority));
 	}
 
 retry:
