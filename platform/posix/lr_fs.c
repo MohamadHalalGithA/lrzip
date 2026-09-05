@@ -1,4 +1,4 @@
-/* Filesystem queries, POSIX.                   SESSION 6, SESSION 7, SESSION 9 */
+/* Filesystem queries, POSIX.                            SESSION 6, SESSION 7 */
 
 #include "lr_platform.h"
 
@@ -34,10 +34,3 @@ bool lr_set_owner(int fd, unsigned int uid, unsigned int gid)
 	return fchown(fd, (uid_t)uid, (gid_t)gid) == 0;
 }
 
-/* SESSION 9 */
-bool lr_set_file_time(const char *path, time_t mtime)
-{
-	(void)path;
-	(void)mtime;
-	return false;
-}
