@@ -1,4 +1,4 @@
-/* Filesystem queries, Win32.                   SESSION 6, SESSION 7, SESSION 9 */
+/* Filesystem queries, Win32.                            SESSION 6, SESSION 7 */
 
 #include "lr_platform.h"
 #include "lr_win32.h"
@@ -96,7 +96,8 @@ bool lr_set_mode(int fd, unsigned int mode)
 	   read back from the file, so writing them again would be a no-op, but
 	   setting LastWriteTime explicitly also stops Windows updating it
 	   automatically for this handle -- and this file is still being written.
-	   Preserving times is Session 9's job and belongs in lr_set_file_time. */
+	   Preserving the input file's times is a separate job, done with utime()
+	   in lrzip.c's preserve_times(). */
 	fbi.CreationTime.QuadPart = 0;
 	fbi.LastAccessTime.QuadPart = 0;
 	fbi.LastWriteTime.QuadPart = 0;
@@ -117,10 +118,3 @@ bool lr_set_owner(int fd, unsigned int uid, unsigned int gid)
 	return true;
 }
 
-/* SESSION 9 */
-bool lr_set_file_time(const char *path, time_t mtime)
-{
-	(void)path;
-	(void)mtime;
-	return false;
-}
