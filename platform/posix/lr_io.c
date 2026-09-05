@@ -1,18 +1,19 @@
 /* Positional I/O, POSIX.                                         SESSION 9 */
 
 #include "lr_platform.h"
-#include <errno.h>
+#include <unistd.h>
+
+/* Thin wrappers: pread/pwrite are exactly this interface. off_t is 64-bit
+   because configure.ac calls AC_SYS_LARGEFILE, which defines
+   _FILE_OFFSET_BITS 64 in config.h -- included from lr_platform.h above, so
+   the definition is in scope before <unistd.h> is read. */
 
 ssize_t lr_pread(int fd, void *buf, size_t count, lr_i64 offset)
 {
-	(void)fd; (void)buf; (void)count; (void)offset;
-	errno = ENOSYS;
-	return -1;
+	return pread(fd, buf, count, (off_t)offset);
 }
 
 ssize_t lr_pwrite(int fd, const void *buf, size_t count, lr_i64 offset)
 {
-	(void)fd; (void)buf; (void)count; (void)offset;
-	errno = ENOSYS;
-	return -1;
+	return pwrite(fd, buf, count, (off_t)offset);
 }
