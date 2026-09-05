@@ -67,8 +67,13 @@ bool lr_echo_enable(void);
                                                                   SESSION 6 */
 lr_i64 lr_free_space(int fd);
 
-/* Copy a modification time onto a file.                          SESSION 9 */
-bool lr_set_file_time(const char *path, time_t mtime);
+/* No lr_set_file_time() here, though Session 5 planned one and Session 9 was
+   to implement it. UCRT64 supplies <utime.h> and a working utime(), so
+   lrzip.c's preserve_times() needs no help: the call compiles and behaves as
+   it does on Linux. An lr_* wrapper would have been indirection with one
+   implementation. Same reasoning retired the planned lr_time_ms() below.
+   Under the settled MinGW-only scope there is no second implementation to
+   abstract over; if that scope ever widens, these come back.     SESSION 9 */
 
 /* Flush a descriptor's written data to the storage device.       SESSION 7 */
 bool lr_fsync(int fd);
@@ -109,9 +114,9 @@ lr_i64 lr_physical_ram(void);
    can use the result directly as a thread count.                  SESSION 7 */
 int lr_cpu_count(void);
 
-/* ------------------------------------------------------------------- timing
-   Monotonic-ish millisecond clock for progress reporting.        SESSION 9 */
-lr_i64 lr_time_ms(void);
+/* No timing section: UCRT64 supplies <sys/time.h> and gettimeofday(), which is
+   what main.c, rzip.c and runzip.c call and all they need. See the note beside
+   lr_fsync above.                                                 SESSION 9 */
 
 /* -------------------------------------------------------------- pseudorandom
    A full-width 32-bit value for seeding rzip's rolling-hash index table.
@@ -127,8 +132,30 @@ lr_i64 lr_time_ms(void);
 uint32_t lr_random32(void);
 
 /* --------------------------------------------------------------- scheduling
-   Drop this process to background priority ("nice").             SESSION 9 */
-bool lr_set_low_priority(void);
+   Priority expressed as a POSIX nice value: LR_PRIO_MIN is the most
+   favourable, LR_PRIO_MAX the least. lrzip's -N option is documented in these
+   terms and defaults to 19, so the range is part of the user interface and
+   cannot be replaced with a Windows priority class without changing what -N
+   means.
+
+   The scope is the CALLING THREAD, not the process. That is what the call
+   sites need -- stream.c renices each worker as it starts, expecting to affect
+   only that worker -- and it is what Linux already does, where nice is a
+   per-thread attribute despite PRIO_PROCESS being the name of the flag.
+
+   Windows has no nice values. The backend maps the range onto the seven thread
+   priority levels, which is lossy in one direction only: distinct nice values
+   can land on the same level, so lr_get_priority() returns a representative
+   value for the current level rather than necessarily the one last set. Only
+   lrzip's warning message reads it back, so that is enough.
+
+   lr_set_priority() returns false if the level could not be applied; callers
+   fall back to leaving priority alone.                           SESSION 9 */
+#define LR_PRIO_MIN (-20)
+#define LR_PRIO_MAX 19
+
+int  lr_get_priority(void);
+bool lr_set_priority(int nice_val);
 
 /* ----------------------------------------------------------- positional I/O
    Read/write at an absolute offset without moving the file pointer.
