@@ -187,9 +187,6 @@ typedef struct cksem cksem_t;
 typedef sem_t cksem_t;
 #endif
 
-#if !defined(__linux)
- #define mremap fake_mremap
-#endif
 
 #define bswap_32(x) \
      ((((x) & 0xff000000) >> 24) | (((x) & 0x00ff0000) >>  8) |		      \
@@ -375,6 +372,11 @@ struct md5_ctx
 };
 
 struct sliding_buffer {
+	/* buf_low/buf_high stay the working pointers every hot loop reads;
+	 * map_low/map_high are the platform-layer handles that own them and
+	 * must be refreshed with lr_map_ptr() after any move. */
+	lr_mapping *map_low;
+	lr_mapping *map_high;
 	uchar *buf_low;	/* The low window buffer */
 	uchar *buf_high;/* "" high "" */
 	i64 orig_offset;/* Where the original buffer started */

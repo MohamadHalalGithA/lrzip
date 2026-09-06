@@ -865,17 +865,17 @@ static bool get_hash(rzip_control *control, int make_hash)
 		dealloc(passphrase);
 		return false;
 	}
-	mlock(passphrase, PASS_LEN);
-	mlock(testphrase, PASS_LEN);
-	mlock(control->salt_pass, PASS_LEN);
-	mlock(control->hash, HASH_LEN);
+	lr_mem_lock(passphrase, PASS_LEN);
+	lr_mem_lock(testphrase, PASS_LEN);
+	lr_mem_lock(control->salt_pass, PASS_LEN);
+	lr_mem_lock(control->hash, HASH_LEN);
 
 	if (control->pass_cb) {
 		control->pass_cb(control->pass_data, passphrase, PASS_LEN - SALT_LEN);
 		if (!passphrase[0]) {
 			fatal("Supplied password was null!");
-			munlock(passphrase, PASS_LEN);
-			munlock(testphrase, PASS_LEN);
+			lr_mem_unlock(passphrase, PASS_LEN);
+			lr_mem_unlock(testphrase, PASS_LEN);
 			dealloc(testphrase);
 			dealloc(passphrase);
 			release_hashes(control);
@@ -910,8 +910,8 @@ retry_pass:
 	if (ENCRYPT_AEAD) {
 		if (unlikely(!lrz_aead_kdf_setup(control))) {
 			memset(passphrase, 0, PASS_LEN);
-			munlock(passphrase, PASS_LEN);
-			munlock(testphrase, PASS_LEN);
+			lr_mem_unlock(passphrase, PASS_LEN);
+			lr_mem_unlock(testphrase, PASS_LEN);
 			dealloc(testphrase);
 			dealloc(passphrase);
 			failure_return(("Failed AEAD key derivation\n"), false);
@@ -919,8 +919,8 @@ retry_pass:
 	} else
 		lrz_stretch(control);
 	memset(passphrase, 0, PASS_LEN);
-	munlock(passphrase, PASS_LEN);
-	munlock(testphrase, PASS_LEN);
+	lr_mem_unlock(passphrase, PASS_LEN);
+	lr_mem_unlock(testphrase, PASS_LEN);
 	dealloc(testphrase);
 	dealloc(passphrase);
 	return true;
@@ -933,8 +933,8 @@ static void release_hashes(rzip_control *control)
 	lrz_secure_wipe(control->aead_key_hdr, LRZ_AEAD_KEY_LEN);
 	lrz_secure_wipe(control->aead_key_data, LRZ_AEAD_KEY_LEN);
 	lrz_secure_wipe(control->aead_salt, LRZ_AEAD_SALT_LEN);
-	munlock(control->salt_pass, PASS_LEN);
-	munlock(control->hash, HASH_LEN);
+	lr_mem_unlock(control->salt_pass, PASS_LEN);
+	lr_mem_unlock(control->hash, HASH_LEN);
 	dealloc(control->salt_pass);
 	dealloc(control->hash);
 }
