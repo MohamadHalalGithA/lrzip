@@ -26,6 +26,8 @@
 #include "lr_win32.h"
 #include <errno.h>
 #include <io.h>
+#include <fcntl.h>
+#include <stdio.h>
 
 /* Windows counts a transfer in DWORD, so a single call cannot exceed 4 GiB-1.
    Callers pass at most a stream buffer, far below that, but clamping keeps a
@@ -134,4 +136,18 @@ ssize_t lr_pwrite(int fd, const void *buf, size_t count, lr_i64 offset)
 	/* Casting away const is safe: WriteFile does not modify the buffer, and
 	   the const is dropped only to share one body with the read path. */
 	return lr_pio(fd, (void *)buf, count, offset, true);
+}
+
+/* See lr_platform.h for the measurements behind this. */
+void lr_platform_init(void)
+{
+	_set_fmode(_O_BINARY);
+
+	/* _set_fmode only governs files opened afterwards; the three standard
+	   streams already exist. stdin and stdout carry archive bytes whenever
+	   lrzip is used in a pipeline, so both must be binary. stderr is left
+	   in text mode: it carries only human-readable messages, which are
+	   better off with the line endings the console expects. */
+	_setmode(_fileno(stdin), _O_BINARY);
+	_setmode(_fileno(stdout), _O_BINARY);
 }
