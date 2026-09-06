@@ -59,9 +59,6 @@
 #include "filters.h"
 #include "lrzip_core.h"
 
-#ifndef MAP_ANONYMOUS
-# define MAP_ANONYMOUS MAP_ANON
-#endif
 
 #define CHUNK_MULTIPLE (100 * 1024 * 1024)
 #define CKSUM_CHUNK 1024*1024
@@ -112,29 +109,27 @@ static void remap_low_sb(rzip_control *control, struct sliding_buffer *sb)
 	new_offset = sb->offset_search;
 	round_to_page(&new_offset);
 	print_maxverbose("Sliding main buffer to offset %"PRId64"\n", new_offset);
-	if (unlikely(munmap(sb->buf_low, sb->size_low)))
-		failure("Failed to munmap in remap_low_sb\n");
 	if (new_offset + sb->size_low > sb->orig_size)
 		sb->size_low = sb->orig_size - new_offset;
 	sb->offset_low = new_offset;
-	sb->buf_low = (uchar *)mmap(sb->buf_low, sb->size_low, PROT_READ, MAP_SHARED, sb->fd, sb->orig_offset + sb->offset_low);
-	if (unlikely(sb->buf_low == MAP_FAILED))
+	if (unlikely(!lr_map_move(sb->map_low, sb->orig_offset + sb->offset_low,
+				  (size_t)sb->size_low)))
 		failure("Failed to re mmap in remap_low_sb\n");
+	sb->buf_low = (uchar *)lr_map_ptr(sb->map_low);
 }
 
 static inline void remap_high_sb(rzip_control *control, struct sliding_buffer *sb, i64 p)
 {
-	if (unlikely(munmap(sb->buf_high, sb->size_high)))
-		failure("Failed to munmap in remap_high_sb\n");
 	sb->size_high = sb->high_length; /* In case we shrunk it when we hit the end of the file */
 	sb->offset_high = p;
 	/* Make sure offset is rounded to page size of total offset */
 	sb->offset_high -= (sb->offset_high + sb->orig_offset) % control->page_size;
 	if (unlikely(sb->offset_high + sb->size_high > sb->orig_size))
 		sb->size_high = sb->orig_size - sb->offset_high;
-	sb->buf_high = (uchar *)mmap(sb->buf_high, sb->size_high, PROT_READ, MAP_SHARED, sb->fd, sb->orig_offset + sb->offset_high);
-	if (unlikely(sb->buf_high == MAP_FAILED))
+	if (unlikely(!lr_map_move(sb->map_high, sb->orig_offset + sb->offset_high,
+				  (size_t)sb->size_high)))
 		failure("Failed to re mmap in remap_high_sb\n");
+	sb->buf_high = (uchar *)lr_map_ptr(sb->map_high);
 }
 
 /* We use a "sliding mmap" to effectively read more than we can fit into the
@@ -1104,29 +1099,6 @@ static inline void init_hash_indexes(struct rzip_state *st)
 		st->hash_index[i] = (tag)lr_random32();
 }
 
-#if !defined(__linux)
-# define mremap fake_mremap
-
-static inline void *fake_mremap(void *old_address, size_t old_size, size_t new_size, int flags __UNUSED__)
-{
-	if (new_size > old_size) {
-		/* No control pointer here; match process-wide failure status. */
-		fprintf(stderr, "fake_mremap: This should only be used to shrink things.\n");
-		exit(LRZIP_EXIT_FAILURE);
-	} else {
-		/* new_size occupies N pages; old_size occupies M > N pages;
-		 we want to unmap the M - N pages at the end.
-		 note the idiom: ceiling(n/k) = (n+k-1) div k */
-		size_t kept_n = (new_size + PAGE_SIZE - 1) / PAGE_SIZE;
-		int ret = munmap(old_address + (kept_n * PAGE_SIZE), old_size - (kept_n * PAGE_SIZE));
-
-		if (ret < 0)
-			return MAP_FAILED;
-
-		return old_address;
-	}
-}
-#endif
 
 /* stdin is not file backed so we have to emulate the mmap by mapping
  * anonymous ram and reading stdin into it. It means the maximum ram
@@ -1150,16 +1122,18 @@ static inline void mmap_stdin(rzip_control *control, uchar *buf,
 			/* Should be EOF */
 			print_maxverbose("Shrinking chunk to %"PRId64"\n", total);
 			if (likely(total)) {
-				buf = (uchar *)mremap(buf, st->chunk_size, total, 0);
+				if (unlikely(!lr_map_shrink(control->sb.map_low,
+							    (size_t)total)))
+					failure("Failed to remap to smaller buf in mmap_stdin\n");
 				st->mmap_size = st->chunk_size = total;
 			} else {
 				/* Empty file */
-				buf = (uchar *)mremap(buf, st->chunk_size, control->page_size, 0);
+				if (unlikely(!lr_map_shrink(control->sb.map_low,
+							    (size_t)control->page_size)))
+					failure("Failed to remap to smaller buf in mmap_stdin\n");
 				st->mmap_size = control->page_size;
 				st->chunk_size = 0;
 			}
-			if (unlikely(buf == MAP_FAILED))
-				failure("Failed to remap to smaller buf in mmap_stdin\n");
 			control->eof = st->stdin_eof = 1;
 			break;
 		}
@@ -1178,9 +1152,11 @@ init_sliding_mmap(rzip_control *control, struct rzip_state *st, int fd_in,
 	/* Initialise the high buffer. One page size is fastest to manipulate */
 	if (!STDIN) {
 		sb->high_length = control->page_size;
-		sb->buf_high = (uchar *)mmap(NULL, sb->high_length, PROT_READ, MAP_SHARED, fd_in, offset);
-		if (unlikely(sb->buf_high == MAP_FAILED))
+		sb->map_high = lr_map_create(fd_in, offset,
+					     (size_t)sb->high_length, LR_MAP_READ);
+		if (unlikely(!sb->map_high))
 			failure("Unable to mmap buf_high in init_sliding_mmap\n");
+		sb->buf_high = (uchar *)lr_map_ptr(sb->map_high);
 		sb->size_high = sb->high_length;
 		sb->offset_high = 0;
 	}
@@ -1237,22 +1213,23 @@ rzip_chunk(rzip_control *control, struct rzip_state *st, int fd_in, int fd_out,
 		if (kind != LRZ_FILTER_NONE && !STDIN) {
 			/* Remap the chunk privately so it can be converted
 			 * in place. Failure just means no filter. */
-			uchar *newbuf;
+			lr_mapping *newmap;
 
-			if (unlikely(munmap(sb->buf_low, sb->size_low)))
-				failure("Failed to munmap in rzip_chunk\n");
-			newbuf = (uchar *)mmap(NULL, sb->size_low, PROT_READ | PROT_WRITE,
-					       MAP_PRIVATE, sb->fd, sb->orig_offset + sb->offset_low);
-			if (unlikely(newbuf == MAP_FAILED)) {
+			lr_map_destroy(sb->map_low);
+			newmap = lr_map_create(sb->fd, sb->orig_offset + sb->offset_low,
+					       (size_t)sb->size_low, LR_MAP_COPY);
+			if (unlikely(!newmap)) {
 				/* Restore a read only shared map and carry on
 				 * unfiltered */
-				newbuf = (uchar *)mmap(NULL, sb->size_low, PROT_READ,
-						       MAP_SHARED, sb->fd, sb->orig_offset + sb->offset_low);
-				if (unlikely(newbuf == MAP_FAILED))
+				newmap = lr_map_create(sb->fd,
+						       sb->orig_offset + sb->offset_low,
+						       (size_t)sb->size_low, LR_MAP_READ);
+				if (unlikely(!newmap))
 					failure("Failed to re mmap in rzip_chunk\n");
 				kind = LRZ_FILTER_NONE;
 			}
-			sb->buf_low = newbuf;
+			sb->map_low = newmap;
+			sb->buf_low = (uchar *)lr_map_ptr(newmap);
 		}
 		if (kind != LRZ_FILTER_NONE) {
 			/* The stored md5 must be of the original bytes, so
@@ -1275,16 +1252,14 @@ rzip_chunk(rzip_control *control, struct rzip_state *st, int fd_in, int fd_out,
 	print_verbose("Beginning rzip pre-processing phase\n");
 	hash_search(control, st, pct_base, pct_multiple);
 
-	/* unmap buffer before closing and reallocating streams */
-	if (unlikely(munmap(sb->buf_low, sb->size_low))) {
-		close_stream_out(control, st->ss);
-		failure("Failed to munmap in rzip_chunk\n");
-	}
+	/* release the windows before closing and reallocating streams */
+	lr_map_destroy(sb->map_low);
+	sb->map_low = NULL;
+	sb->buf_low = NULL;
 	if (!STDIN) {
-		if (unlikely(munmap(sb->buf_high, sb->size_high))) {
-			close_stream_out(control, st->ss);
-			failure("Failed to munmap in rzip_chunk\n");
-		}
+		lr_map_destroy(sb->map_high);
+		sb->map_high = NULL;
+		sb->buf_high = NULL;
 	}
 
 	if (unlikely(close_stream_out(control, st->ss)))
@@ -1438,9 +1413,10 @@ void rzip_fd(rzip_control *control, int fd_in, int fd_out)
 retry:
 		if (STDIN) {
 			/* NOTE the buf is saved here for STDIN mode */
-			sb->buf_low = mmap(NULL, st->mmap_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+			sb->map_low = lr_map_create(-1, 0, (size_t)st->mmap_size,
+						    LR_MAP_ANON);
 			/* Better to shrink the window to the largest size that works than fail */
-			if (sb->buf_low == MAP_FAILED) {
+			if (!sb->map_low) {
 				if (unlikely(errno != ENOMEM)) {
 					close_streamout_threads(control);
 					dealloc(st->hash_table);
@@ -1457,12 +1433,15 @@ retry:
 				}
 				goto retry;
 			}
+			sb->buf_low = (uchar *)lr_map_ptr(sb->map_low);
 			st->chunk_size = st->mmap_size;
 			mmap_stdin(control, sb->buf_low, st);
 		} else {
 			/* NOTE The buf is saved here for !STDIN mode */
-			sb->buf_low = (uchar *)mmap(sb->buf_low, st->mmap_size, PROT_READ, MAP_SHARED, fd_in, offset);
-			if (sb->buf_low == MAP_FAILED) {
+			sb->map_low = lr_map_create(fd_in, offset,
+						    (size_t)st->mmap_size,
+						    LR_MAP_READ);
+			if (!sb->map_low) {
 				if (unlikely(errno != ENOMEM)) {
 					close_streamout_threads(control);
 					dealloc(st->hash_table);
@@ -1479,6 +1458,7 @@ retry:
 				}
 				goto retry;
 			}
+			sb->buf_low = (uchar *)lr_map_ptr(sb->map_low);
 			if (st->mmap_size < st->chunk_size) {
 				print_maxverbose("Enabling sliding mmap mode and using mmap of %"PRId64" bytes with window of %"PRId64" bytes\n", st->mmap_size, st->chunk_size);
 				control->do_mcpy = &sliding_mcpy;
