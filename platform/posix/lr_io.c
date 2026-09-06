@@ -1,31 +1,25 @@
-/* Timing and process priority, POSIX.                            SESSION 9 */
+/* Positional I/O, POSIX.                                         SESSION 9 */
 
 #include "lr_platform.h"
-#include <sys/resource.h>
-#include <errno.h>
+#include <unistd.h>
 
-/* PRIO_PROCESS is a misnomer on Linux, where nice is a per-thread attribute
-   and this therefore affects only the calling thread -- which is what the
-   header promises and what stream.c relies on. */
+/* Thin wrappers: pread/pwrite are exactly this interface. off_t is 64-bit
+   because configure.ac calls AC_SYS_LARGEFILE, which defines
+   _FILE_OFFSET_BITS 64 in config.h -- included from lr_platform.h above, so
+   the definition is in scope before <unistd.h> is read. */
 
-int lr_get_priority(void)
+ssize_t lr_pread(int fd, void *buf, size_t count, lr_i64 offset)
 {
-	int prio;
-
-	/* getpriority legitimately returns -1, so errno is the only way to tell
-	   a real failure from a valid nice value of -1. */
-	errno = 0;
-	prio = getpriority(PRIO_PROCESS, 0);
-	if (prio == -1 && errno != 0)
-		return 0;			/* unknown; report as neutral */
-
-	return prio;
+	return pread(fd, buf, count, (off_t)offset);
 }
 
-bool lr_set_priority(int nice_val)
+ssize_t lr_pwrite(int fd, const void *buf, size_t count, lr_i64 offset)
 {
-	if (nice_val < LR_PRIO_MIN || nice_val > LR_PRIO_MAX)
-		return false;
+	return pwrite(fd, buf, count, (off_t)offset);
+}
 
-	return setpriority(PRIO_PROCESS, 0, nice_val) == 0;
+/* Nothing to do: POSIX has no text mode, so a file is already what it says.
+   The function exists so main() can call it unconditionally. */
+void lr_platform_init(void)
+{
 }
