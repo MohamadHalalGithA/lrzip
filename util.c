@@ -187,18 +187,13 @@ size_t round_up_page(rzip_control *control, size_t len)
 
 bool get_rand(rzip_control *control, uchar *buf, int len)
 {
-	int fd;
-
-	/* Fail closed: weak PRNG fallback is unsafe for salts/IVs. */
-	fd = open("/dev/urandom", O_RDONLY);
-	if (unlikely(fd == -1))
-		fatal_return(("Failed to open /dev/urandom in get_rand\n"), false);
-	if (unlikely(read(fd, buf, len) != len)) {
-		close(fd);
-		fatal_return(("Failed to read fd in get_rand\n"), false);
-	}
-	if (unlikely(close(fd)))
-		fatal_return(("Failed to close fd in get_rand\n"), false);
+	/* Fail closed: weak PRNG fallback is unsafe for salts/IVs. The entropy
+	 * source is platform knowledge -- /dev/urandom on POSIX, CNG on Windows
+	 * -- so it lives behind lr_secure_random(). */
+	if (unlikely(len < 0))
+		fatal_return(("Negative length in get_rand\n"), false);
+	if (unlikely(!lr_secure_random(buf, (size_t)len)))
+		fatal_return(("Failed to obtain random bytes in get_rand\n"), false);
 	return true;
 }
 
@@ -371,7 +366,7 @@ static void xor128 (void *pa, const void *pb)
 static void lrz_keygen(const rzip_control *control, const uchar *salt, uchar *key, uchar *iv)
 {
 	uchar buf [HASH_LEN + SALT_LEN + PASS_LEN];
-	mlock(buf, HASH_LEN + SALT_LEN + PASS_LEN);
+	lr_mem_lock(buf, HASH_LEN + SALT_LEN + PASS_LEN);
 
 	memcpy(buf, control->hash, HASH_LEN);
 	memcpy(buf + HASH_LEN, salt, SALT_LEN);
@@ -384,7 +379,7 @@ static void lrz_keygen(const rzip_control *control, const uchar *salt, uchar *ke
 	sha4(buf, HASH_LEN + SALT_LEN + control->salt_pass_len, iv, 0);
 
 	memset(buf, 0, sizeof(buf));
-	munlock(buf, sizeof(buf));
+	lr_mem_unlock(buf, sizeof(buf));
 }
 
 bool lrz_crypt(const rzip_control *control, uchar *buf, i64 len, const uchar *salt, int encrypt)
@@ -398,9 +393,9 @@ bool lrz_crypt(const rzip_control *control, uchar *buf, i64 len, const uchar *sa
 	bool ret = false;
 
 	/* Generate unique key and IV for each block of data based on salt */
-	mlock(&aes_ctx, sizeof(aes_ctx));
-	mlock(key, HASH_LEN);
-	mlock(iv, HASH_LEN);
+	lr_mem_lock(&aes_ctx, sizeof(aes_ctx));
+	lr_mem_lock(key, HASH_LEN);
+	lr_mem_lock(iv, HASH_LEN);
 
 	lrz_keygen(control, salt, key, iv);
 
@@ -448,9 +443,9 @@ error:
 	memset(&aes_ctx, 0, sizeof(aes_ctx));
 	memset(iv, 0, HASH_LEN);
 	memset(key, 0, HASH_LEN);
-	munlock(&aes_ctx, sizeof(aes_ctx));
-	munlock(iv, HASH_LEN);
-	munlock(key, HASH_LEN);
+	lr_mem_unlock(&aes_ctx, sizeof(aes_ctx));
+	lr_mem_unlock(iv, HASH_LEN);
+	lr_mem_unlock(key, HASH_LEN);
 	return ret;
 }
 
@@ -459,7 +454,7 @@ void lrz_stretch(rzip_control *control)
 	sha4_context ctx = {};
 	i64 j, n, counter;
 
-	mlock(&ctx, sizeof(ctx));
+	lr_mem_lock(&ctx, sizeof(ctx));
 	sha4_starts(&ctx, 0);
 
 	n = control->encloops * HASH_LEN / (control->salt_pass_len + sizeof(i64));
@@ -471,7 +466,7 @@ void lrz_stretch(rzip_control *control)
 	}
 	sha4_finish(&ctx, control->hash);
 	memset(&ctx, 0, sizeof(ctx));
-	munlock(&ctx, sizeof(ctx));
+	lr_mem_unlock(&ctx, sizeof(ctx));
 }
 
 #include "gcm.h"
