@@ -328,6 +328,9 @@ int main(int argc, char *argv[])
 	char *eptr, *av; /* for environment */
 	char *endptr = NULL;
 
+	/* Must run before any file is opened. See lr_platform.h. */
+	lr_platform_init();
+
         control = &base_control;
 
 	initialise_control(control);
