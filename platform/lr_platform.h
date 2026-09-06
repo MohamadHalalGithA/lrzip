@@ -13,7 +13,7 @@
 
      2. Declare the lr_* interface. Interfaces are shaped by what callers need,
         not by what POSIX happens to expose: lr_free_space() returns one integer
-        rather than reproducing struct statvfs, and lr_map_resize() is named for
+        rather than reproducing struct statvfs, and lr_map_move() is named for
         the caller's intent because Windows cannot offer mremap's mechanism.
 
    One implementation of each function exists per platform, in platform/posix/
@@ -49,6 +49,21 @@ typedef int64_t lr_i64;
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* ------------------------------------------------------------------- startup
+   Call once, as the first statement in main(), before anything is opened.
+
+   Windows opens files in TEXT mode by default, and that is not cosmetic here.
+   Measured on UCRT64: writing the 4 bytes "a\nb\n" produces a 6-byte file,
+   because every \n is expanded to \r\n; and reading a buffer containing 0x1A
+   stops there, returning 2 of 8 bytes, because the CRT still treats Ctrl-Z as
+   end of file. Compressed data contains both bytes constantly, so an archive
+   written in text mode is corrupt and one read in text mode ends early.
+
+   lrzip never passes O_BINARY -- it has no reason to, since the flag does not
+   exist on POSIX -- so the mode is set process-wide here instead of at forty
+   call sites.                                                  SESSION 10 */
+void lr_platform_init(void);
 
 /* ------------------------------------------------------------------ console
    Toggle terminal echo around the passphrase prompt. Both return false if
@@ -131,6 +146,17 @@ int lr_cpu_count(void);
    drives match-finding.                                           SESSION 7 */
 uint32_t lr_random32(void);
 
+/* Cryptographically secure random bytes, for salts and IVs. Returns false if
+   the system could not supply them, and the caller MUST treat that as fatal:
+   get_rand() in util.c fails closed on purpose, because falling back to a
+   weak PRNG for a salt is worse than refusing to encrypt.
+
+   Distinct from lr_random32() above in every respect that matters. That one
+   must be deterministic and reproducible across platforms; this one must be
+   unpredictable. Sharing an implementation between them would break one or
+   the other.                                                  SESSION 10 */
+bool lr_secure_random(void *buf, size_t len);
+
 /* --------------------------------------------------------------- scheduling
    Priority expressed as a POSIX nice value: LR_PRIO_MIN is the most
    favourable, LR_PRIO_MAX the least. lrzip's -N option is documented in these
@@ -188,21 +214,68 @@ ssize_t lr_pwrite(int fd, const void *buf, size_t count, lr_i64 offset);
    loops, which is a redesign rather than a port.        SESSION 8 */
 bool lr_install_interrupt_handler(void (*handler)(void));
 
+/* ----------------------------------------------------------- memory locking
+   Pin a buffer so the OS cannot page it out. lrzip uses this only on secrets
+   -- passphrases, keys, IVs, the AES context -- so that they cannot be written
+   to the pagefile and survive there after the process exits. This is a
+   confidentiality measure, not a correctness one.
+
+   Best effort by design, matching how the call sites treat it: every one of
+   them ignores the result, because failing to lock is a reason to keep going
+   with a weaker guarantee rather than to refuse to compress a file. Both
+   platforms can refuse -- POSIX on RLIMIT_MEMLOCK, Windows on the process
+   working-set quota -- and neither is worth aborting over.
+
+   Locks do not nest on either platform: one unlock releases a page however
+   many times it was locked.                                     SESSION 10 */
+bool lr_mem_lock(void *addr, size_t len);
+bool lr_mem_unlock(void *addr, size_t len);
+
 /* ----------------------------------------------------------- memory mapping
    lr_mapping is opaque. This is the decision most expensive to get wrong: the
    win32 implementation must retain a HANDLE and an alignment delta that POSIX
    has no use for, and a bare void * return would have nowhere to keep them.
 
-   lr_map_resize() replaces mremap(). Callers MUST re-fetch the pointer with
-   lr_map_ptr() afterwards -- on Windows the region is unmapped and remapped,
-   so the address moves.                                         SESSION 10 */
+   The mode is an enum rather than the `bool writable` Session 5 planned,
+   because "writable" hides the distinction that matters most here. rzip_chunk
+   maps a chunk writably so lrz_filter_convert_mem() can do branch conversion
+   IN PLACE. Those writes must never reach the file: the mapping is of the
+   user's INPUT, and a shared writable mapping would rewrite the file being
+   compressed. LR_MAP_COPY is copy-on-write (MAP_PRIVATE / FILE_MAP_COPY) and
+   is the only writable file mode offered, so that mistake cannot be spelled.
+
+   lr_map_move() replaces the munmap+mmap pair that slides the compression
+   window, and lr_map_shrink() replaces mremap(), which lrzip only ever uses to
+   shrink. Both are named for the caller's intent because Windows cannot offer
+   either mechanism directly.
+
+   Callers MUST re-fetch the pointer with lr_map_ptr() after lr_map_move() --
+   the region is remapped, so the address moves. lr_map_shrink() keeps the
+   address, since it only releases pages off the end.
+
+   On failure lr_map_create() returns NULL with errno set, using ENOMEM for
+   "that was too big". rzip_fd() retries at 90% of the size on ENOMEM, and
+   that loop is how lrzip copes with a window larger than the address space
+   will give it.                                                 SESSION 10 */
+typedef enum {
+	LR_MAP_READ,	/* file, read only, shared   -- PROT_READ, MAP_SHARED  */
+	LR_MAP_COPY,	/* file, copy on write       -- MAP_PRIVATE, writable  */
+	LR_MAP_ANON	/* private RAM, no file       -- MAP_ANONYMOUS          */
+} lr_map_mode;
+
 typedef struct lr_mapping lr_mapping;
 
-lr_mapping *lr_map_create(int fd, lr_i64 offset, size_t len, bool writable);
+lr_mapping *lr_map_create(int fd, lr_i64 offset, size_t len, lr_map_mode mode);
 void       *lr_map_ptr(lr_mapping *m);
 size_t      lr_map_len(lr_mapping *m);
-bool        lr_map_resize(lr_mapping *m, size_t new_len);
-void        lr_map_destroy(lr_mapping *m);
+
+/* Re-point a file mapping at a different part of the same file. */
+bool        lr_map_move(lr_mapping *m, lr_i64 offset, size_t len);
+
+/* Release pages off the end of an anonymous mapping. Shrink only. */
+bool        lr_map_shrink(lr_mapping *m, size_t new_len);
+
+void        lr_map_destroy(lr_mapping *m);   /* NULL is a no-op */
 
 #ifdef __cplusplus
 }
