@@ -102,6 +102,10 @@ lrzip_SOURCES = \
 nodist_EXTRA_lrzip_SOURCES = dummyy.cxx
 
 lrzip_LDADD = libtmplrzip.la
+if LR_PLATFORM_WIN32
+# BCryptGenRandom, for lr_secure_random().
+lrzip_LDADD += -lbcrypt
+endif
 if STATIC
   lrzip_LDFLAGS = -all-static
 endif

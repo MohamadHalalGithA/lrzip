@@ -30,6 +30,9 @@
 */
 
 #include "lr_platform.h"
+#include "lr_win32.h"
+#include <bcrypt.h>
+#include <limits.h>
 
 /* Ring of the last 31 values. Index arithmetic works modulo 31 because the
    recurrence reaches back exactly 31 places: (i - 31) mod 31 == i mod 31. */
@@ -103,4 +106,19 @@ uint32_t lr_random32(void)
 	uint32_t low = lr_random_next();
 
 	return (high << 16) ^ low;
+}
+
+/* BCryptGenRandom with BCRYPT_USE_SYSTEM_PREFERRED_RNG is the documented CNG
+   entropy source and needs no algorithm handle. Chosen over rand_s(), which
+   would avoid the bcrypt import but is specified in terms of a C library
+   function rather than as a CSPRNG, and over RtlGenRandom, which is not part
+   of the documented API surface. bcrypt.dll ships with every supported
+   Windows, so this stays a native build with no redistributable added. */
+bool lr_secure_random(void *buf, size_t len)
+{
+	if (len > ULONG_MAX)
+		return false;
+
+	return BCryptGenRandom(NULL, (PUCHAR)buf, (ULONG)len,
+			       BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
 }
